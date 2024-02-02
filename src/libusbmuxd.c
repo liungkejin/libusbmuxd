@@ -116,6 +116,18 @@ static int libusbmuxd_debug = 0;
 #define LIBUSBMUXD_DEBUG(level, format, ...) if (level <= libusbmuxd_debug) fprintf(stderr, ("[" PACKAGE "] " format), __VA_ARGS__); fflush(stderr);
 #define LIBUSBMUXD_ERROR(format, ...) LIBUSBMUXD_DEBUG(0, format, __VA_ARGS__)
 
+static enum usbmuxd_socket_type socket_type =
+#if defined(WIN32) || defined(__CYGWIN__)
+	SOCKET_TYPE_TCP;
+#else
+	SOCKET_TYPE_UNIX;
+#endif
+
+static char* tcp_host = "127.0.0.1";
+static int tcp_host_initialized = 0;
+static uint16_t tcp_port = USBMUXD_SOCKET_PORT;
+
+
 static struct collection devices;
 static THREAD_T devmon = THREAD_T_NULL;
 static int listenfd = -1;
@@ -214,9 +226,14 @@ static int connect_usbmuxd_socket()
 		}
 	}
 #if defined(WIN32) || defined(__CYGWIN__)
-	res = socket_connect("127.0.0.1", USBMUXD_SOCKET_PORT);
+	// res = socket_connect("127.0.0.1", USBMUXD_SOCKET_PORT);
+	return socket_connect(tcp_host, tcp_port);
 #else
-	res = socket_connect_unix(USBMUXD_SOCKET_FILE);
+	if (socket_type == SOCKET_TYPE_UNIX) {
+		return socket_connect_unix(USBMUXD_SOCKET_FILE);
+	} else {
+		return socket_connect(tcp_host, tcp_port);
+	}
 #endif
 	if (res < 0) {
 		res = -errno;
@@ -1800,4 +1817,47 @@ USBMUXD_API void libusbmuxd_set_debug_level(int level)
 {
 	libusbmuxd_debug = level;
 	socket_set_verbose(level);
+}
+
+USBMUXD_API int usbmuxd_set_socket_type(enum usbmuxd_socket_type value)
+{
+#if defined(WIN32) || defined(__CYGWIN__)
+	// On Windows, the socket type is TCP by default and you cannot change it to anything else.
+	if (value != SOCKET_TYPE_TCP)
+	{
+		return -EINVAL;
+	}
+#else
+	if (value != SOCKET_TYPE_TCP && value != SOCKET_TYPE_UNIX)
+	{
+		return -EINVAL;
+	}
+
+	socket_type = value;
+#endif
+	return 0;
+}
+
+USBMUXD_API int usbmuxd_get_socket_type(enum usbmuxd_socket_type* value)
+{
+	*value = socket_type;
+	return 0;
+}
+
+USBMUXD_API int usbmuxd_set_tcp_endpoint(const char* host, uint16_t port)
+{
+	if (tcp_host_initialized) {
+		free(tcp_host);
+	}
+	tcp_host = strdup(host);
+	tcp_host_initialized = 1;
+	tcp_port = port;
+	return 0;
+}
+
+USBMUXD_API int usbmuxd_get_tcp_endpoint(char** host, uint16_t* port)
+{
+	*host = strdup(tcp_host);
+	*port = tcp_port;
+	return 0;
 }
